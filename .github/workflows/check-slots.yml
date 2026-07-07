@@ -11,27 +11,31 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - name: Debug - pokaż łańcuch certyfikatów
+        run: |
+          echo "--- openssl s_client (pełny łańcuch od serwera) ---"
+          openssl s_client -connect kwalifikacje.raszeja.poznan.pl:443 \
+            -servername kwalifikacje.raszeja.poznan.pl -showcerts </dev/null 2>/dev/null \
+            | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/ { print }' \
+            | tee chain_raw.pem | grep -c "BEGIN CERTIFICATE" || true
+
+          echo "--- Szczegóły certyfikatu (issuer/subject) ---"
+          openssl s_client -connect kwalifikacje.raszeja.poznan.pl:443 \
+            -servername kwalifikacje.raszeja.poznan.pl </dev/null 2>/dev/null \
+            | openssl x509 -noout -issuer -subject
+
+          echo "--- Wersja curl i test z -v ---"
+          curl --version | head -1
+          curl -v "https://kwalifikacje.raszeja.poznan.pl/api/visit-types/2/availability" 2>&1 | tail -40 || true
+
       - name: Sprawdź dostępność i wyślij powiadomienie
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           set -e
-          # Add timeout and retry logic
-          RESPONSE=$(curl -s --max-time 10 --connect-timeout 5 \
-            "https://kwalifikacje.raszeja.poznan.pl/api/visit-types/2/availability" || echo "{}")
-          
-          # Validate API response before processing
-          if [ -z "$RESPONSE" ] || [ "$RESPONSE" = "{}" ]; then
-            echo "API returned empty or error response"
-            exit 0
-          fi
-          
-          # Add error handling for jq parsing
-          if ! echo "$RESPONSE" | jq empty 2>/dev/null; then
-            echo "Invalid JSON response from API"
-            exit 0
-          fi
+          RESPONSE=$(curl -s "https://kwalifikacje.raszeja.poznan.pl/api/visit-types/2/availability")
+          echo "Odpowiedź API: $RESPONSE"
 
           FREE=$(echo "$RESPONSE" | jq -c '[.availability[] | select(.available == true and .availableSlots > 0 and .excluded == false)]')
           COUNT=$(echo "$FREE" | jq 'length')

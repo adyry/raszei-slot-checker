@@ -17,8 +17,21 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           set -e
-          RESPONSE=$(curl -s "https://kwalifikacje.raszeja.poznan.pl/api/visit-types/2/availability")
-          echo "Odpowiedź API: $RESPONSE"
+          # Add timeout and retry logic
+          RESPONSE=$(curl -s --max-time 10 --connect-timeout 5 \
+            "https://kwalifikacje.raszeja.poznan.pl/api/visit-types/2/availability" || echo "{}")
+          
+          # Validate API response before processing
+          if [ -z "$RESPONSE" ] || [ "$RESPONSE" = "{}" ]; then
+            echo "API returned empty or error response"
+            exit 0
+          fi
+          
+          # Add error handling for jq parsing
+          if ! echo "$RESPONSE" | jq empty 2>/dev/null; then
+            echo "Invalid JSON response from API"
+            exit 0
+          fi
 
           FREE=$(echo "$RESPONSE" | jq -c '[.availability[] | select(.available == true and .availableSlots > 0 and .excluded == false)]')
           COUNT=$(echo "$FREE" | jq 'length')

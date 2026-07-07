@@ -11,22 +11,39 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Debug - pokaż łańcuch certyfikatów
+      - name: Zbuduj pełny łańcuch certyfikatów (fix brakującego intermediate)
         run: |
-          echo "--- openssl s_client (pełny łańcuch od serwera) ---"
-          openssl s_client -connect kwalifikacje.raszeja.poznan.pl:443 \
-            -servername kwalifikacje.raszeja.poznan.pl -showcerts </dev/null 2>/dev/null \
-            | awk '/BEGIN CERTIFICATE/,/END CERTIFICATE/ { print }' \
-            | tee chain_raw.pem | grep -c "BEGIN CERTIFICATE" || true
+          set -e
+          HOST="kwalifikacje.raszeja.poznan.pl"
 
-          echo "--- Szczegóły certyfikatu (issuer/subject) ---"
-          openssl s_client -connect kwalifikacje.raszeja.poznan.pl:443 \
-            -servername kwalifikacje.raszeja.poznan.pl </dev/null 2>/dev/null \
-            | openssl x509 -noout -issuer -subject
+          # Pobierz certyfikat liścia i wyciągnij URL do certyfikatu wystawcy (AIA)
+          openssl s_client -connect "$HOST:443" -servername "$HOST" </dev/null 2>/dev/null \
+            | openssl x509 -noout -text > leaf_info.txt
 
-          echo "--- Wersja curl i test z -v ---"
-          curl --version | head -1
-          curl -v "https://kwalifikacje.raszeja.poznan.pl/api/visit-types/2/availability" 2>&1 | tail -40 || true
+          echo "--- Pole Authority Information Access ---"
+          grep -A2 "CA Issuers" leaf_info.txt || echo "Brak pola AIA - certyfikat nie wskazuje URL do intermediate."
+
+          AIA_URL=$(grep -A1 "CA Issuers" leaf_info.txt | grep -o 'http[^ ]*' | head -1)
+          echo "Znaleziony URL: $AIA_URL"
+
+          if [ -n "$AIA_URL" ]; then
+            curl -sL "$AIA_URL" -o intermediate_raw.crt
+            # Serwer AIA może zwrócić DER albo PEM - próbujemy oba
+            if openssl x509 -inform DER -in intermediate_raw.crt -out intermediate.pem 2>/dev/null; then
+              echo "Skonwertowano z DER."
+            else
+              cp intermediate_raw.crt intermediate.pem
+              echo "Użyto jako PEM bez konwersji."
+            fi
+            openssl x509 -noout -subject -in intermediate.pem
+          else
+            echo "Nie znaleziono AIA - tworzę pusty plik intermediate.pem"
+            touch intermediate.pem
+          fi
+
+          # Zbuduj pełny bundle: systemowe CA + doklejony intermediate
+          cat /etc/ssl/certs/ca-certificates.crt intermediate.pem > full-ca-bundle.pem
+          echo "Bundle gotowy: $(grep -c 'BEGIN CERTIFICATE' full-ca-bundle.pem) certyfikatów."
 
       - name: Sprawdź dostępność i wyślij powiadomienie
         env:
@@ -34,7 +51,7 @@ jobs:
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           set -e
-          RESPONSE=$(curl -s "https://kwalifikacje.raszeja.poznan.pl/api/visit-types/2/availability")
+          RESPONSE=$(curl -s --cacert full-ca-bundle.pem "https://kwalifikacje.raszeja.poznan.pl/api/visit-types/2/availability")
           echo "Odpowiedź API: $RESPONSE"
 
           FREE=$(echo "$RESPONSE" | jq -c '[.availability[] | select(.available == true and .availableSlots > 0 and .excluded == false)]')

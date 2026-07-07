@@ -1,0 +1,37 @@
+name: Sprawdzanie wolnych terminów
+
+on:
+  schedule:
+    # GitHub nie gwarantuje dokładnie co 5 minut przy dużym obciążeniu,
+    # ale to najczęstszy praktyczny minimalny odstęp.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {} # pozwala odpalić ręcznie z zakładki Actions na GitHubie
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sprawdź dostępność i wyślij powiadomienie
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          set -e
+          RESPONSE=$(curl -s "https://kwalifikacje.raszeja.poznan.pl/api/visit-types/2/availability")
+          echo "Odpowiedź API: $RESPONSE"
+
+          FREE=$(echo "$RESPONSE" | jq -c '[.availability[] | select(.available == true and .availableSlots > 0 and .excluded == false)]')
+          COUNT=$(echo "$FREE" | jq 'length')
+
+          if [ "$COUNT" -gt 0 ]; then
+            VISIT_NAME=$(echo "$RESPONSE" | jq -r '.visitTypeName')
+            LIST=$(echo "$FREE" | jq -r '.[] | "\(.date): \(.availableSlots)/\(.totalSlots) miejsc"')
+            TEXT="Dostępne terminy ($VISIT_NAME)!
+          $LIST"
+
+            curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg chat_id "$TG_CHAT_ID" --arg text "$TEXT" '{chat_id: $chat_id, text: $text}')"
+          else
+            echo "Brak wolnych terminów."
+          fi

@@ -1,0 +1,1 @@
+# raszei-slot-checker

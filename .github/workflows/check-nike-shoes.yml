@@ -20,7 +20,13 @@ jobs:
 
           API_URL="https://api.nike.com/discover/product_details_availability/v1/marketplace/PL/language/pl/consumerChannelId/d9a5bc42-4b9c-4976-858a-f159cf99c647/groupKey/sWJyVgyr"
           SKU="e4eece4d-6446-5744-a532-70727bf9da27"
-          RESPONSE="$(curl --fail --silent --show-error "$API_URL")"
+          RESPONSE="$(curl --compressed --fail --silent --show-error \
+            -H 'Accept: application/json, text/plain, */*' \
+            -H 'Accept-Language: pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7' \
+            -H 'Origin: https://www.nike.com' \
+            -H 'Referer: https://www.nike.com/pl/t/buty-damskie-nike-v5-rnr-z-akcentami-odbijajacymi-swiatlo-sWJyVgyr/HQ7901-602' \
+            -H 'User-Agent: Mozilla/5.0' \
+            "$API_URL")"
 
           AVAILABLE="$(jq --arg sku "$SKU" '[.sizes[] | select(.merchSkuId == $sku and .availability.isAvailable == true)] | length' <<< "$RESPONSE")"
 

@@ -1,0 +1,32 @@
+name: Sprawdzanie butów Nike
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sprawdź dostępność rozmiaru 38.5
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          set -euo pipefail
+
+          API_URL="https://api.nike.com/discover/product_details_availability/v1/marketplace/PL/language/pl/consumerChannelId/d9a5bc42-4b9c-4976-858a-f159cf99c647/groupKey/sWJyVgyr"
+          SKU="e4eece4d-6446-5744-a532-70727bf9da27"
+          RESPONSE="$(curl --fail --silent --show-error "$API_URL")"
+
+          AVAILABLE="$(jq --arg sku "$SKU" '[.sizes[] | select(.merchSkuId == $sku and .availability.isAvailable == true)] | length' <<< "$RESPONSE")"
+
+          if [ "$AVAILABLE" -gt 0 ]; then
+            TEXT="Buty Nike V5 RNR są dostępne!\nRozmiar: EU 38.5\nhttps://www.nike.com/pl/t/buty-damskie-nike-v5-rnr-z-akcentami-odbijajacymi-swiatlo-sWJyVgyr/HQ7901-602"
+            curl --fail --silent --show-error -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg chat_id "$TG_CHAT_ID" --arg text "$TEXT" '{chat_id: $chat_id, text: $text}')"
+          else
+            echo "Rozmiar EU 38.5 jest niedostępny."
+          fi
